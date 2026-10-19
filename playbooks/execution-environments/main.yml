@@ -1,0 +1,101 @@
+---
+- name: Create custom EE and upload to Automation Hub
+  hosts: localhost
+  gather_facts: false
+  vars_prompt:
+    - name: automation_hub_password
+      prompt: Enter the Automation Hub password
+      private: true
+  vars:
+    # Container runtime to use for building the EE
+    ee_container_runtime: podman
+    # Whether to delete the build dir when done
+    ee_builder_dir_clean: false
+    # Directory to store all build and context files
+    builder_dir: .
+    # Whether to prune images after building the EE
+    ee_prune_images: false
+    # Whether to pull base images to avoid stale images
+    ee_update_base_images: false
+    # Credential name for the controller EE definition
+    ee_reg_credential: Automation Hub Container Registry
+    # Pull collections from a specific hub during the EE build
+    ee_pull_collections_from_hub: false
+    # # Hub/AAP hostname used for ansible.cfg when pulling collections
+    # aap_hostname: hub.nas
+    # # Token used for ansible.cfg when pulling collections
+    # aap_token: <token>
+    # Registry path/URL (and namespace) where the image will be pushed
+    ee_registry_dest: aap-aap.apps.cluster-zm92w.dyn.redhatworkshops.io
+    # Username for authenticating to the destination registry
+    ee_registry_username: admin
+    # Password for authenticating to the destination registry
+    ee_registry_password: "{{ automation_hub_password }}"
+    # Increase ansible-builder output verbosity (0-3)
+    ee_verbosity: 3
+    # List of execution environments to build
+    ee_list:
+      # Name of the EE image to create (namespace goes in ee_registry_dest)
+      - name: stream_9_custom
+        # Alternate display name for the controller EE definition
+        alt_name: RHEL9 Minimal Custom
+        # [DEPRECATED] Tag to use when pushing the image
+        tags:
+          - 1.0.0
+          - latest
+        # Dependencies installed into the final image
+        dependencies:
+          python_interpreter:
+            package_system: "python3.12"
+            python_path: "/usr/bin/python3.12"
+          ansible_core:
+            package_pip: ansible-core==2.16.19
+          ansible_runner:
+            package_pip: ansible-runner
+          system:
+            - python-requests
+            - python-pyyaml
+          python:
+            - pytz # for schedule_rrule lookup plugin
+            - python-dateutil>=2.7.0 # schedule_rrule
+            - awxkit # For import and export modules
+          galaxy:
+            collections:
+              - name: ansible.windows
+                version: 3.8.0
+        # Custom build commands for builder phases
+        build_steps:
+          prepend_final:
+            - RUN whoami
+            - RUN cat /etc/os-release
+          append_final:
+            - RUN echo This is a post-install command!
+        # Keywords/options that affect builder runtime functionality
+        options:
+          package_manager_path: /usr/bin/dnf
+        # Base image definition; overrides ee_base_image for this EE
+        images:
+          base_image:
+            name: quay.io/centos/centos:stream9
+  tasks:
+    - name: Build the EE
+      ansible.builtin.import_role:
+        name: infra.ee_utilities.ee_builder
+      tags:
+        - build
+        - never
+    - name: Add the EE to AAP Execution Environments
+      ansible.builtin.import_role:
+        name: infra.aap_configuration.controller_execution_environments
+      vars:
+        aap_hostname: "{{ ee_registry_dest }}"
+        aap_username: "{{ ee_registry_username }}"
+        aap_password: "{{ automation_hub_password }}"
+        controller_execution_environments:
+          - name: "{{ ee_list.0.name }}"
+            image: "{{ ee_registry_dest }}/{{ ee_list.0.name }}:{{ ee_list.0.tags.0 }}"
+            description: "Execution Environment for {{ ee_list.0.name }}"
+            pull: missing
+      tags:
+        - create_ee_definition
+        - never
