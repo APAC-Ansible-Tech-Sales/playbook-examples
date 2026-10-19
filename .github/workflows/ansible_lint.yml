@@ -1,0 +1,10 @@
+name: Ansible Lint
+on:
+  workflow_dispatch:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  ansible_lint:
+    uses: ./.github/workflows/template_ansible_lint.yml
