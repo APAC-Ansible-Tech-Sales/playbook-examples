@@ -1,0 +1,27 @@
+---
+- name: Show stats in the AAP UI
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Gather storage capacity
+      shell: df -h --total | grep total
+      register: storageusage
+  
+    - name: Gather list of users
+      command: cat /etc/passwd
+      register: userlist
+    
+    - name: Show storage usage
+      ansible.builtin.debug:
+        var: storageusage.stdout_lines
+
+    - name: Show user list
+      ansible.builtin.debug:
+        var: userlist.stdout_lines
+    
+    - name: Publish stats for AAP Artifacts
+      ansible.builtin.set_stats:
+        data:
+          storage_usage: "{{ storageusage.stdout }}"
+          users: "{{ userlist.stdout_lines }}"
+        aggregate: false
