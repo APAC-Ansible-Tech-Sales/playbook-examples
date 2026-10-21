@@ -3,6 +3,9 @@ collections:
   - name: containers.podman
     version: ">=1.14.0,<2.0.0"
     source: https://galaxy.ansible.com/api/
+  - name: ansible.platform
+    version: ">=2.5.0,<2.6.0"
+    source: https://console.redhat.com/api/automation-hub/
   - name: infra.ee_utilities
     version: ">=4.6.0,<5.0.0"
     source: https://galaxy.ansible.com/api/
