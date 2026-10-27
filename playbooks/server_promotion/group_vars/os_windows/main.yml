@@ -1,0 +1,16 @@
+---
+# Runtime / fleet settings (not the release pins — those live in manifest.yml)
+
+# Batch size for upgrades (Ansible serial). Use a percentage or host count.
+# https://docs.ansible.com/projects/ansible/latest/playbook_guide/playbooks_strategies.html#setting-the-batch-size-with-serial
+promotion_serial: "50%"
+
+# Preferred Chocolatey source (internal/approved feed). Empty = default sources on the host.
+chocolatey_source: ""
+
+# When true, discover reports installed packages not listed in managed_packages
+report_unmanaged_packages: true
+
+# Stage selector for AAP job templates (discover | preflight | upgrade_agent | upgrade_packages | verify)
+# Leave unset (or use tags) when running a single stage via --tags
+# promotion_stage: discover
