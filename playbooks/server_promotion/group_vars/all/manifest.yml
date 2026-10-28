@@ -10,7 +10,5 @@ chocolatey_target_version: "2.4.1"
 managed_packages:
   - name: git
     version: "2.47.0"
-  - name: vscode
-    version: "1.95.0"
   - name: 7zip
     version: "24.8.0"
