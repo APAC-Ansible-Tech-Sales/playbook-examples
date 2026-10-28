@@ -128,9 +128,7 @@
         - name: Publish discover stats for AAP Artifacts
           ansible.builtin.set_stats:
             data:
-              discover_host: "{{ inventory_hostname }}"
               discover_agent: "{{ drift_report.agent }}"
-              discover_packages: "{{ drift_report.packages }}"
               discover_packages_drifting: "{{ drift_report.packages_drifting }}"
               discover_unmanaged: "{{ drift_report.unmanaged }}"
             aggregate: false
@@ -165,12 +163,10 @@
     
         - name: Publish upgrade_agent stats for AAP Artifacts
           ansible.builtin.set_stats:
-            data:
-              upgrade_agent_host: "{{ inventory_hostname }}"
+            data: 
               upgrade_agent_before: "{{ agent_version_before | trim }}"
               upgrade_agent_target: "{{ chocolatey_target_version }}"
               upgrade_agent_changed: "{{ agent_upgrade.changed | default(false) }}"
-              manifest_chocolatey_target_version: "{{ chocolatey_target_version }}"
             aggregate: false
 
     # ------------------------------------------------------------------
