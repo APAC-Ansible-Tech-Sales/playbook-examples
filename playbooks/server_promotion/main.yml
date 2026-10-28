@@ -179,7 +179,7 @@
             aggregate: false
 
     # ------------------------------------------------------------------
-    # Upgrade packages — apply managed_packages pins
+    # Upgrade and Install missing packages — apply managed_packages pins
     # ------------------------------------------------------------------
     - name: Upgrade packages Chocolatey agent and managed packages
       tags:
