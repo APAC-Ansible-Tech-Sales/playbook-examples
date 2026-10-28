@@ -3,7 +3,7 @@
 # Drive stages with promotion_stage extra var and/or --tags:
 # preflight | discover | upgrade_agent | upgrade_packages | verify
 - name: Promote Chocolatey agent and managed packages
-  hosts: dev_servers
+  hosts: os_windows
   serial: "{{ promotion_serial | default('100%') }}"
   gather_facts: true
   become: true
