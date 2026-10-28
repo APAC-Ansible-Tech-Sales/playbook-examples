@@ -156,7 +156,16 @@
         - name: Upgrade Chocolatey agent to pinned version
           chocolatey.chocolatey.win_chocolatey:
             name: chocolatey
-            state: present
+            # present installs missing; upgrade/downgrade move an existing pin (present alone will not)
+            state: >-
+              {{
+                'present' if (agent_version_before | trim) == 'not_installed'
+                else (
+                  'downgrade'
+                  if (agent_version_before | trim) is version(chocolatey_target_version, '>')
+                  else 'upgrade'
+                )
+              }}
             version: "{{ chocolatey_target_version }}"
             source: "{{ chocolatey_source if chocolatey_source | length > 0 else omit }}"
           register: agent_upgrade
@@ -203,12 +212,20 @@
         - name: Ensure managed packages match manifest
           chocolatey.chocolatey.win_chocolatey:
             name: "{{ item.name }}"
-            state: present
-            version: "{{ item.version }}"
+            # present installs missing; upgrade/downgrade move an existing pin (present alone will not)
+            state: >-
+              {{
+                'present' if item.installed_before == 'not_installed'
+                else (
+                  'downgrade' if item.installed_before is version(item.target, '>')
+                  else 'upgrade'
+                )
+              }}
+            version: "{{ item.target }}"
             source: "{{ chocolatey_source if chocolatey_source | length > 0 else omit }}"
-          loop: "{{ managed_packages }}"
+          loop: "{{ packages_before }}"
           loop_control:
-            label: "{{ item.name }}-{{ item.version }}"
+            label: "{{ item.name }}-{{ item.target }} ({{ item.installed_before }})"
           register: package_upgrade
     
         - name: Publish upgrade_packages stats for AAP Artifacts
