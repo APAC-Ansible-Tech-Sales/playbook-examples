@@ -1,7 +1,7 @@
 ---
 # Chocolatey agent + managed package promotion.
 # Drive stages with promotion_stage extra var and/or --tags:
-#   discover | preflight | upgrade_agent | upgrade_packages | verify
+#   preflight | discover | upgrade_agent | upgrade_packages | verify
 - name: Promote Chocolatey agent and managed packages
   hosts: dev_servers
   serial: "{{ promotion_serial | default('100%') }}"
@@ -52,7 +52,7 @@
               preflight_choco_present: true
               preflight_admin_ok: true
             aggregate: false
-          when: preflight_admin_ok.stdout | trim | lower == 'true'
+          when: preflight_admin_ok is success 
 
     # ------------------------------------------------------------------
     # Discover — report agent + managed package versions; flag drift
@@ -64,7 +64,7 @@
       block:
         - name: Gather Chocolatey facts
           chocolatey.chocolatey.win_chocolatey_facts:
-    
+
         - name: Resolve installed Chocolatey agent version
           ansible.builtin.set_fact:
             discovered_agent_version: >-
@@ -75,7 +75,7 @@
                 | first
                 | default('not_installed')
               }}
-    
+
         - name: Resolve installed version for each managed package
           ansible.builtin.set_fact:
             discovered_packages: "{{ discovered_packages | default([]) + [package_entry] }}"
@@ -96,7 +96,7 @@
           loop: "{{ managed_packages }}"
           loop_control:
             label: "{{ item.name }}"
-    
+
         - name: Collect unmanaged installed packages
           ansible.builtin.set_fact:
             discovered_unmanaged: >-
@@ -108,7 +108,7 @@
                 | list
                 if report_unmanaged_packages | bool else []
               }}
-    
+
         - name: Build discover drift report
           ansible.builtin.set_fact:
             drift_report:
@@ -120,11 +120,11 @@
               packages: "{{ discovered_packages | default([]) }}"
               packages_drifting: "{{ discovered_packages | default([]) | rejectattr('matches') | list }}"
               unmanaged: "{{ discovered_unmanaged | default([]) }}"
-    
+
         - name: Show discover results
           ansible.builtin.debug:
             var: drift_report
-    
+
         - name: Publish discover stats for AAP Artifacts
           ansible.builtin.set_stats:
             data:
@@ -172,6 +172,7 @@
               upgrade_agent_changed: "{{ agent_upgrade.changed | default(false) }}"
               manifest_chocolatey_target_version: "{{ chocolatey_target_version }}"
             aggregate: false
+
     # ------------------------------------------------------------------
     # Upgrade packages — apply managed_packages pins
     # ------------------------------------------------------------------
