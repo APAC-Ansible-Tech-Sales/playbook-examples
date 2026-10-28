@@ -1,7 +1,7 @@
 ---
 # Chocolatey agent + managed package promotion.
 # Drive stages with promotion_stage extra var and/or --tags:
-#   preflight | discover | upgrade_agent | upgrade_packages | verify
+# preflight | discover | upgrade_agent | upgrade_packages | verify
 - name: Promote Chocolatey agent and managed packages
   hosts: dev_servers
   serial: "{{ promotion_serial | default('100%') }}"
