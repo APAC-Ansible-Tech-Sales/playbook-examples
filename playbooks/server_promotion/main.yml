@@ -234,8 +234,6 @@
               upgrade_packages_host: "{{ inventory_hostname }}"
               upgrade_packages_before: "{{ packages_before | default([]) }}"
               upgrade_packages_target: "{{ managed_packages }}"
-              upgrade_packages_changed: "{{ package_upgrade.results | default([]) | map(attribute='changed') | list }}"
-              manifest_managed_packages: "{{ managed_packages }}"
             aggregate: false
     
     # ------------------------------------------------------------------
