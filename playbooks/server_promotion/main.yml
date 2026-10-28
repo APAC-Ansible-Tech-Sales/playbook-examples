@@ -10,6 +10,51 @@
 
   tasks:
     # ------------------------------------------------------------------
+    # Preflight — fail if not running as Administrator or Chocolatey is not installed
+    # ------------------------------------------------------------------
+    - name: Preflight Chocolatey agent
+      tags:
+        - preflight
+        - never
+      block:
+        - name: Assert Chocolatey is installed
+          ansible.windows.win_stat:
+            path: C:\ProgramData\chocolatey\bin\choco.exe
+          register: choco_bin
+
+        - name: Fail if Chocolatey binary is missing
+          ansible.builtin.assert:
+            that:
+              - choco_bin.stat.exists
+            fail_msg: "Chocolatey is not installed on {{ inventory_hostname }} (choco.exe missing)."
+
+        - name: Verify admin privileges for Chocolatey operations
+          ansible.windows.win_shell: |
+            ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
+              [Security.Principal.WindowsBuiltInRole]::Administrator
+            )
+          register: is_admin
+          changed_when: false
+
+        - name: Fail if not running as Administrator
+          ansible.builtin.assert:
+            that:
+              - (is_admin.stdout | trim | lower) == 'true'
+            fail_msg: >-
+              WinRM session on {{ inventory_hostname }} is not elevated;
+              Chocolatey upgrades require Administrator.
+          register: preflight_admin_ok
+
+        - name: Publish preflight stats for AAP Artifacts
+          ansible.builtin.set_stats:
+            data:
+              preflight_host: "{{ inventory_hostname }}"
+              preflight_choco_present: true
+              preflight_admin_ok: true
+            aggregate: false
+          when: preflight_admin_ok.stdout | trim | lower == 'true'
+
+    # ------------------------------------------------------------------
     # Discover — report agent + managed package versions; flag drift
     # ------------------------------------------------------------------
     - name: Discover Chocolatey agent and managed packages
@@ -91,252 +136,168 @@
             aggregate: false
 
     # ------------------------------------------------------------------
-    # Preflight — fail closed; no installs
+    # Upgrade agent — pin chocolatey first
     # ------------------------------------------------------------------
-    - name: Preflight Chocolatey agent and managed packages
+    - name: Upgrade agent Chocolatey agent and managed packages
+      tags: upgrade_agent
+      block:
+        - name: Record Chocolatey agent version before upgrade
+          chocolatey.chocolatey.win_chocolatey_facts:
+    
+        - name: Capture agent version before upgrade
+          ansible.builtin.set_fact:
+            agent_version_before: >-
+              {{
+                ansible_chocolatey.packages
+                | selectattr('package', 'equalto', 'chocolatey')
+                | map(attribute='version')
+                | first
+                | default('not_installed')
+              }}
+    
+        - name: Upgrade Chocolatey agent to pinned version
+          chocolatey.chocolatey.win_chocolatey:
+            name: chocolatey
+            state: present
+            version: "{{ chocolatey_target_version }}"
+            source: "{{ chocolatey_source if chocolatey_source | length > 0 else omit }}"
+          register: agent_upgrade
+    
+        - name: Publish upgrade_agent stats for AAP Artifacts
+          ansible.builtin.set_stats:
+            data:
+              upgrade_agent_host: "{{ inventory_hostname }}"
+              upgrade_agent_before: "{{ agent_version_before | trim }}"
+              upgrade_agent_target: "{{ chocolatey_target_version }}"
+              upgrade_agent_changed: "{{ agent_upgrade.changed | default(false) }}"
+              manifest_chocolatey_target_version: "{{ chocolatey_target_version }}"
+            aggregate: false
+    # ------------------------------------------------------------------
+    # Upgrade packages — apply managed_packages pins
+    # ------------------------------------------------------------------
+    - name: Upgrade packages Chocolatey agent and managed packages
       tags:
-        - preflight
+        - upgrade_packages
         - never
       block:
-        - name: Assert Chocolatey is installed
-          ansible.windows.win_stat:
-            path: C:\ProgramData\chocolatey\bin\choco.exe
-          register: choco_bin
-
-        - name: Fail if Chocolatey binary is missing
-          ansible.builtin.assert:
-            that:
-              - choco_bin.stat.exists
-            fail_msg: "Chocolatey is not installed on {{ inventory_hostname }} (choco.exe missing)."
-
-        - name: Verify admin privileges for Chocolatey operations
-          ansible.windows.win_shell: |
-            ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
-              [Security.Principal.WindowsBuiltInRole]::Administrator
-            )
-          register: is_admin
-          changed_when: false
-
-        - name: Fail if not running as Administrator
-          ansible.builtin.assert:
-            that:
-              - (is_admin.stdout | trim | lower) == 'true'
-            fail_msg: >-
-              WinRM session on {{ inventory_hostname }} is not elevated;
-              Chocolatey upgrades require Administrator.
-
-        - name: Check Chocolatey source / feed reachability
-          ansible.windows.win_shell: choco source list --limit-output
-          register: choco_sources
-          changed_when: false
-          failed_when: choco_sources.rc != 0
-
-        - name: Resolve Chocolatey agent target version against the feed
-          ansible.windows.win_shell: |
-            $ver = '{{ chocolatey_target_version }}'
-            $src = '{{ chocolatey_source }}'
-            $args = @('search', 'chocolatey', '--exact', "--version=$ver", '--limit-output')
-            if (-not [string]::IsNullOrWhiteSpace($src)) { $args += "--source=$src" }
-            $out = & choco @args 2>&1 | Out-String
-            if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($out.Trim())) {
-              Write-Error "chocolatey version $ver not found on feed"
-              exit 1
-            }
-            $out.Trim()
-          register: agent_resolve
-          changed_when: false
-
-        - name: Resolve each manifest package version against the feed
-          ansible.windows.win_shell: |
-            $pkg = '{{ item.name }}'
-            $ver = '{{ item.version }}'
-            $src = '{{ chocolatey_source }}'
-            $args = @('search', $pkg, '--exact', "--version=$ver", '--limit-output')
-            if (-not [string]::IsNullOrWhiteSpace($src)) { $args += "--source=$src" }
-            $out = & choco @args 2>&1 | Out-String
-            if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($out.Trim())) {
-              Write-Error "Package $pkg version $ver not found on feed"
-              exit 1
-            }
-            $out.Trim()
+        - name: Record managed package versions before upgrade
+          chocolatey.chocolatey.win_chocolatey_facts:
+    
+        - name: Capture package versions before upgrade
+          ansible.builtin.set_fact:
+            packages_before: "{{ packages_before | default([]) + [pkg_before] }}"
+          vars:
+            installed_before: >-
+              {{
+                ansible_chocolatey.packages
+                | selectattr('package', 'equalto', item.name)
+                | map(attribute='version')
+                | first
+                | default('not_installed')
+              }}
+            pkg_before:
+              name: "{{ item.name }}"
+              target: "{{ item.version }}"
+              installed_before: "{{ installed_before | trim }}"
+          loop: "{{ managed_packages }}"
+          loop_control:
+            label: "{{ item.name }}"
+    
+        - name: Ensure managed packages match manifest
+          chocolatey.chocolatey.win_chocolatey:
+            name: "{{ item.name }}"
+            state: present
+            version: "{{ item.version }}"
+            source: "{{ chocolatey_source if chocolatey_source | length > 0 else omit }}"
           loop: "{{ managed_packages }}"
           loop_control:
             label: "{{ item.name }}-{{ item.version }}"
-          register: package_resolve
-          changed_when: false
-
-        - name: Publish preflight stats for AAP Artifacts
+          register: package_upgrade
+    
+        - name: Publish upgrade_packages stats for AAP Artifacts
           ansible.builtin.set_stats:
             data:
-              preflight_host: "{{ inventory_hostname }}"
-              preflight_choco_present: true
-              preflight_admin_ok: true
-              preflight_sources: "{{ choco_sources.stdout_lines | default([]) }}"
-              preflight_agent_resolved: "{{ agent_resolve.stdout | default('') | trim }}"
-              preflight_packages_ok: "{{ managed_packages }}"
+              upgrade_packages_host: "{{ inventory_hostname }}"
+              upgrade_packages_before: "{{ packages_before | default([]) }}"
+              upgrade_packages_target: "{{ managed_packages }}"
+              upgrade_packages_changed: "{{ package_upgrade.results | default([]) | map(attribute='changed') | list }}"
+              manifest_managed_packages: "{{ managed_packages }}"
+            aggregate: false
+    
+    # ------------------------------------------------------------------
+    # Verify — assert agent + every managed package matches manifest
+    # ------------------------------------------------------------------
+    - name: Verify Chocolatey agent and managed packages
+      tags:
+        - verify
+        - never
+      block:
+        - name: Gather Chocolatey facts for verify
+          chocolatey.chocolatey.win_chocolatey_facts:
+    
+        - name: Assert Chocolatey agent matches manifest
+          ansible.builtin.assert:
+            that:
+              - >
+                (
+                  ansible_chocolatey.packages
+                  | selectattr('package', 'equalto', 'chocolatey')
+                  | map(attribute='version')
+                  | first
+                  | default('not_installed')
+                ) == chocolatey_target_version
+            fail_msg: >-
+              Agent drift on {{ inventory_hostname }}:
+              expected chocolatey {{ chocolatey_target_version }},
+              found {{
+                ansible_chocolatey.packages
+                | selectattr('package', 'equalto', 'chocolatey')
+                | map(attribute='version')
+                | first
+                | default('not_installed')
+              }}
+            success_msg: "Chocolatey agent matches manifest ({{ chocolatey_target_version }})"
+    
+        - name: Assert each managed package matches manifest
+          ansible.builtin.assert:
+            that:
+              - >
+                (
+                  ansible_chocolatey.packages
+                  | selectattr('package', 'equalto', item.name)
+                  | map(attribute='version')
+                  | first
+                  | default('not_installed')
+                ) == item.version
+            fail_msg: >-
+              Package drift on {{ inventory_hostname }}:
+              {{ item.name }} expected {{ item.version }},
+              found {{
+                ansible_chocolatey.packages
+                | selectattr('package', 'equalto', item.name)
+                | map(attribute='version')
+                | first
+                | default('not_installed')
+              }}
+            success_msg: "{{ item.name }} matches manifest ({{ item.version }})"
+          loop: "{{ managed_packages }}"
+          loop_control:
+            label: "{{ item.name }}-{{ item.version }}"
+    
+        - name: Smoke-check local Chocolatey list
+          ansible.windows.win_shell: choco list --local-only --limit-output
+          register: choco_list_local
+          changed_when: false
+    
+        - name: Publish verify stats for AAP Artifacts
+          ansible.builtin.set_stats:
+            data:
+              verify_host: "{{ inventory_hostname }}"
+              verify_agent_version: "{{ chocolatey_target_version }}"
+              verify_packages: "{{ managed_packages }}"
+              verify_passed: true
+              verify_choco_list: "{{ choco_list_local.stdout_lines | default([]) }}"
               manifest_chocolatey_target_version: "{{ chocolatey_target_version }}"
               manifest_managed_packages: "{{ managed_packages }}"
             aggregate: false
-
-    # # ------------------------------------------------------------------
-    # # Upgrade agent — pin chocolatey first
-    # # ------------------------------------------------------------------
-    # - name: Upgrade agent Chocolatey agent and managed packages
-    #   tags: upgrade_agent
-    #   block:
-    #     - name: Record Chocolatey agent version before upgrade
-    #       chocolatey.chocolatey.win_chocolatey_facts:
-    
-    #     - name: Capture agent version before upgrade
-    #       ansible.builtin.set_fact:
-    #         agent_version_before: >-
-    #           {{
-    #             ansible_chocolatey.packages
-    #             | selectattr('package', 'equalto', 'chocolatey')
-    #             | map(attribute='version')
-    #             | first
-    #             | default('not_installed')
-    #           }}
-    
-    #     - name: Upgrade Chocolatey agent to pinned version
-    #       chocolatey.chocolatey.win_chocolatey:
-    #         name: chocolatey
-    #         state: present
-    #         version: "{{ chocolatey_target_version }}"
-    #         source: "{{ chocolatey_source if chocolatey_source | length > 0 else omit }}"
-    #       register: agent_upgrade
-    
-    #     - name: Publish upgrade_agent stats for AAP Artifacts
-    #       ansible.builtin.set_stats:
-    #         data:
-    #           upgrade_agent_host: "{{ inventory_hostname }}"
-    #           upgrade_agent_before: "{{ agent_version_before | trim }}"
-    #           upgrade_agent_target: "{{ chocolatey_target_version }}"
-    #           upgrade_agent_changed: "{{ agent_upgrade.changed | default(false) }}"
-    #           manifest_chocolatey_target_version: "{{ chocolatey_target_version }}"
-    #         aggregate: false
-    # # ------------------------------------------------------------------
-    # # Upgrade packages — apply managed_packages pins
-    # # ------------------------------------------------------------------
-    # - name: Upgrade packages Chocolatey agent and managed packages
-    #   tags: upgrade_packages
-    #   block:
-    #     - name: Record managed package versions before upgrade
-    #       chocolatey.chocolatey.win_chocolatey_facts:
-    
-    #     - name: Capture package versions before upgrade
-    #       ansible.builtin.set_fact:
-    #         packages_before: "{{ packages_before | default([]) + [pkg_before] }}"
-    #       vars:
-    #         installed_before: >-
-    #           {{
-    #             ansible_chocolatey.packages
-    #             | selectattr('package', 'equalto', item.name)
-    #             | map(attribute='version')
-    #             | first
-    #             | default('not_installed')
-    #           }}
-    #         pkg_before:
-    #           name: "{{ item.name }}"
-    #           target: "{{ item.version }}"
-    #           installed_before: "{{ installed_before | trim }}"
-    #       loop: "{{ managed_packages }}"
-    #       loop_control:
-    #         label: "{{ item.name }}"
-    
-    #     - name: Ensure managed packages match manifest
-    #       chocolatey.chocolatey.win_chocolatey:
-    #         name: "{{ item.name }}"
-    #         state: present
-    #         version: "{{ item.version }}"
-    #         source: "{{ chocolatey_source if chocolatey_source | length > 0 else omit }}"
-    #       loop: "{{ managed_packages }}"
-    #       loop_control:
-    #         label: "{{ item.name }}-{{ item.version }}"
-    #       register: package_upgrade
-    
-    #     - name: Publish upgrade_packages stats for AAP Artifacts
-    #       ansible.builtin.set_stats:
-    #         data:
-    #           upgrade_packages_host: "{{ inventory_hostname }}"
-    #           upgrade_packages_before: "{{ packages_before | default([]) }}"
-    #           upgrade_packages_target: "{{ managed_packages }}"
-    #           upgrade_packages_changed: "{{ package_upgrade.results | default([]) | map(attribute='changed') | list }}"
-    #           manifest_managed_packages: "{{ managed_packages }}"
-    #         aggregate: false
-    
-    # # ------------------------------------------------------------------
-    # # Verify — assert agent + every managed package matches manifest
-    # # ------------------------------------------------------------------
-    # - name: Verify Chocolatey agent and managed packages
-    #   tags: verify
-    #   block:
-    #     - name: Gather Chocolatey facts for verify
-    #       chocolatey.chocolatey.win_chocolatey_facts:
-    
-    #     - name: Assert Chocolatey agent matches manifest
-    #       ansible.builtin.assert:
-    #         that:
-    #           - >
-    #             (
-    #               ansible_chocolatey.packages
-    #               | selectattr('package', 'equalto', 'chocolatey')
-    #               | map(attribute='version')
-    #               | first
-    #               | default('not_installed')
-    #             ) == chocolatey_target_version
-    #         fail_msg: >-
-    #           Agent drift on {{ inventory_hostname }}:
-    #           expected chocolatey {{ chocolatey_target_version }},
-    #           found {{
-    #             ansible_chocolatey.packages
-    #             | selectattr('package', 'equalto', 'chocolatey')
-    #             | map(attribute='version')
-    #             | first
-    #             | default('not_installed')
-    #           }}
-    #         success_msg: "Chocolatey agent matches manifest ({{ chocolatey_target_version }})"
-    
-    #     - name: Assert each managed package matches manifest
-    #       ansible.builtin.assert:
-    #         that:
-    #           - >
-    #             (
-    #               ansible_chocolatey.packages
-    #               | selectattr('package', 'equalto', item.name)
-    #               | map(attribute='version')
-    #               | first
-    #               | default('not_installed')
-    #             ) == item.version
-    #         fail_msg: >-
-    #           Package drift on {{ inventory_hostname }}:
-    #           {{ item.name }} expected {{ item.version }},
-    #           found {{
-    #             ansible_chocolatey.packages
-    #             | selectattr('package', 'equalto', item.name)
-    #             | map(attribute='version')
-    #             | first
-    #             | default('not_installed')
-    #           }}
-    #         success_msg: "{{ item.name }} matches manifest ({{ item.version }})"
-    #       loop: "{{ managed_packages }}"
-    #       loop_control:
-    #         label: "{{ item.name }}-{{ item.version }}"
-    
-    #     - name: Smoke-check local Chocolatey list
-    #       ansible.windows.win_shell: choco list --local-only --limit-output
-    #       register: choco_list_local
-    #       changed_when: false
-    
-    #     - name: Publish verify stats for AAP Artifacts
-    #       ansible.builtin.set_stats:
-    #         data:
-    #           verify_host: "{{ inventory_hostname }}"
-    #           verify_agent_version: "{{ chocolatey_target_version }}"
-    #           verify_packages: "{{ managed_packages }}"
-    #           verify_passed: true
-    #           verify_choco_list: "{{ choco_list_local.stdout_lines | default([]) }}"
-    #           manifest_chocolatey_target_version: "{{ chocolatey_target_version }}"
-    #           manifest_managed_packages: "{{ managed_packages }}"
-    #         aggregate: false
     
