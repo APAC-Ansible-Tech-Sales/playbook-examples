@@ -13,7 +13,9 @@
     # Discover — report agent + managed package versions; flag drift
     # ------------------------------------------------------------------
     - name: Discover Chocolatey agent and managed packages
-      tags: discover
+      tags:
+        - discover
+        - never
       block:
         - name: Gather Chocolatey facts
           chocolatey.chocolatey.win_chocolatey_facts:
@@ -86,95 +88,95 @@
               discover_packages: "{{ drift_report.packages }}"
               discover_packages_drifting: "{{ drift_report.packages_drifting }}"
               discover_unmanaged: "{{ drift_report.unmanaged }}"
+            aggregate: false
+
+    # ------------------------------------------------------------------
+    # Preflight — fail closed; no installs
+    # ------------------------------------------------------------------
+    - name: Preflight Chocolatey agent and managed packages
+      tags:
+        - preflight
+        - never
+      block:
+        - name: Assert Chocolatey is installed
+          ansible.windows.win_stat:
+            path: C:\ProgramData\chocolatey\bin\choco.exe
+          register: choco_bin
+
+        - name: Fail if Chocolatey binary is missing
+          ansible.builtin.assert:
+            that:
+              - choco_bin.stat.exists
+            fail_msg: "Chocolatey is not installed on {{ inventory_hostname }} (choco.exe missing)."
+
+        - name: Verify admin privileges for Chocolatey operations
+          ansible.windows.win_shell: |
+            ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
+              [Security.Principal.WindowsBuiltInRole]::Administrator
+            )
+          register: is_admin
+          changed_when: false
+
+        - name: Fail if not running as Administrator
+          ansible.builtin.assert:
+            that:
+              - (is_admin.stdout | trim | lower) == 'true'
+            fail_msg: >-
+              WinRM session on {{ inventory_hostname }} is not elevated;
+              Chocolatey upgrades require Administrator.
+
+        - name: Check Chocolatey source / feed reachability
+          ansible.windows.win_shell: choco source list --limit-output
+          register: choco_sources
+          changed_when: false
+          failed_when: choco_sources.rc != 0
+
+        - name: Resolve Chocolatey agent target version against the feed
+          ansible.windows.win_shell: |
+            $ver = '{{ chocolatey_target_version }}'
+            $src = '{{ chocolatey_source }}'
+            $args = @('search', 'chocolatey', '--exact', "--version=$ver", '--limit-output')
+            if (-not [string]::IsNullOrWhiteSpace($src)) { $args += "--source=$src" }
+            $out = & choco @args 2>&1 | Out-String
+            if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($out.Trim())) {
+              Write-Error "chocolatey version $ver not found on feed"
+              exit 1
+            }
+            $out.Trim()
+          register: agent_resolve
+          changed_when: false
+
+        - name: Resolve each manifest package version against the feed
+          ansible.windows.win_shell: |
+            $pkg = '{{ item.name }}'
+            $ver = '{{ item.version }}'
+            $src = '{{ chocolatey_source }}'
+            $args = @('search', $pkg, '--exact', "--version=$ver", '--limit-output')
+            if (-not [string]::IsNullOrWhiteSpace($src)) { $args += "--source=$src" }
+            $out = & choco @args 2>&1 | Out-String
+            if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($out.Trim())) {
+              Write-Error "Package $pkg version $ver not found on feed"
+              exit 1
+            }
+            $out.Trim()
+          loop: "{{ managed_packages }}"
+          loop_control:
+            label: "{{ item.name }}-{{ item.version }}"
+          register: package_resolve
+          changed_when: false
+
+        - name: Publish preflight stats for AAP Artifacts
+          ansible.builtin.set_stats:
+            data:
+              preflight_host: "{{ inventory_hostname }}"
+              preflight_choco_present: true
+              preflight_admin_ok: true
+              preflight_sources: "{{ choco_sources.stdout_lines | default([]) }}"
+              preflight_agent_resolved: "{{ agent_resolve.stdout | default('') | trim }}"
+              preflight_packages_ok: "{{ managed_packages }}"
               manifest_chocolatey_target_version: "{{ chocolatey_target_version }}"
               manifest_managed_packages: "{{ managed_packages }}"
             aggregate: false
-
-    # # ------------------------------------------------------------------
-    # # Preflight — fail closed; no installs
-    # # ------------------------------------------------------------------
-    # - name: Preflight Chocolatey agent and managed packages
-    #   tags: preflight
-    #   block:
-    #     - name: Assert Chocolatey is installed
-    #       ansible.windows.win_stat:
-    #         path: C:\ProgramData\chocolatey\bin\choco.exe
-    #       register: choco_bin
-    
-    #     - name: Fail if Chocolatey binary is missing
-    #       ansible.builtin.assert:
-    #         that:
-    #           - choco_bin.stat.exists
-    #         fail_msg: "Chocolatey is not installed on {{ inventory_hostname }} (choco.exe missing)."
-    
-    #     - name: Verify admin privileges for Chocolatey operations
-    #       ansible.windows.win_shell: |
-    #         ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
-    #           [Security.Principal.WindowsBuiltInRole]::Administrator
-    #         )
-    #       register: is_admin
-    #       changed_when: false
-    
-    #     - name: Fail if not running as Administrator
-    #       ansible.builtin.assert:
-    #         that:
-    #           - (is_admin.stdout | trim | lower) == 'true'
-    #         fail_msg: >-
-    #           WinRM session on {{ inventory_hostname }} is not elevated;
-    #           Chocolatey upgrades require Administrator.
-    
-    #     - name: Check Chocolatey source / feed reachability
-    #       ansible.windows.win_shell: choco source list --limit-output
-    #       register: choco_sources
-    #       changed_when: false
-    #       failed_when: choco_sources.rc != 0
-    
-    #     - name: Resolve Chocolatey agent target version against the feed
-    #       ansible.windows.win_shell: |
-    #         $ver = '{{ chocolatey_target_version }}'
-    #         $src = '{{ chocolatey_source }}'
-    #         $args = @('search', 'chocolatey', '--exact', "--version=$ver", '--limit-output')
-    #         if (-not [string]::IsNullOrWhiteSpace($src)) { $args += "--source=$src" }
-    #         $out = & choco @args 2>&1 | Out-String
-    #         if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($out.Trim())) {
-    #           Write-Error "chocolatey version $ver not found on feed"
-    #           exit 1
-    #         }
-    #         $out.Trim()
-    #       register: agent_resolve
-    #       changed_when: false
-    
-    #     - name: Resolve each manifest package version against the feed
-    #       ansible.windows.win_shell: |
-    #         $pkg = '{{ item.name }}'
-    #         $ver = '{{ item.version }}'
-    #         $src = '{{ chocolatey_source }}'
-    #         $args = @('search', $pkg, '--exact', "--version=$ver", '--limit-output')
-    #         if (-not [string]::IsNullOrWhiteSpace($src)) { $args += "--source=$src" }
-    #         $out = & choco @args 2>&1 | Out-String
-    #         if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($out.Trim())) {
-    #           Write-Error "Package $pkg version $ver not found on feed"
-    #           exit 1
-    #         }
-    #         $out.Trim()
-    #       loop: "{{ managed_packages }}"
-    #       loop_control:
-    #         label: "{{ item.name }}-{{ item.version }}"
-    #       register: package_resolve
-    #       changed_when: false
-    
-    #     - name: Publish preflight stats for AAP Artifacts
-    #       ansible.builtin.set_stats:
-    #         data:
-    #           preflight_host: "{{ inventory_hostname }}"
-    #           preflight_choco_present: true
-    #           preflight_admin_ok: true
-    #           preflight_sources: "{{ choco_sources.stdout_lines | default([]) }}"
-    #           preflight_agent_resolved: "{{ agent_resolve.stdout | default('') | trim }}"
-    #           preflight_packages_ok: "{{ managed_packages }}"
-    #           manifest_chocolatey_target_version: "{{ chocolatey_target_version }}"
-    #           manifest_managed_packages: "{{ managed_packages }}"
-    #         aggregate: false
 
     # # ------------------------------------------------------------------
     # # Upgrade agent — pin chocolatey first
