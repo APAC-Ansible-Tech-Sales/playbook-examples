@@ -282,6 +282,7 @@
               }}
             success_msg: "{{ item.name }} matches manifest ({{ item.version }})"
           loop: "{{ managed_packages }}"
+          when: "'upgrade_packages' in ansible_run_tags"
           loop_control:
             label: "{{ item.name }}-{{ item.version }}"
     
@@ -299,6 +300,4 @@
               verify_passed: true
               verify_choco_list: "{{ choco_list_local.stdout_lines | default([]) }}"
               manifest_chocolatey_target_version: "{{ chocolatey_target_version }}"
-              manifest_managed_packages: "{{ managed_packages }}"
             aggregate: false
-    
