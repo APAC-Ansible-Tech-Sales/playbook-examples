@@ -292,8 +292,5 @@
             data:
               verify_host: "{{ inventory_hostname }}"
               verify_agent_version: "{{ chocolatey_target_version }}"
-              verify_packages: "{{ managed_packages }}"
-              verify_passed: true
               verify_choco_list: "{{ choco_list_local.stdout_lines | default([]) }}"
-              manifest_chocolatey_target_version: "{{ chocolatey_target_version }}"
             aggregate: false
