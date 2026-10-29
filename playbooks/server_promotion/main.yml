@@ -43,7 +43,6 @@
             fail_msg: >-
               SSH session on {{ inventory_hostname }} is not elevated;
               Chocolatey upgrades require Administrator.
-          register: preflight_admin_ok
 
         - name: Publish preflight stats for AAP Artifacts
           ansible.builtin.set_stats:
@@ -52,7 +51,6 @@
               preflight_choco_present: true
               preflight_admin_ok: true
             aggregate: false
-          when: preflight_admin_ok is success 
 
     # ------------------------------------------------------------------
     # Discover — report agent + managed package versions; flag drift
