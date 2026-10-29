@@ -41,7 +41,7 @@
             that:
               - (is_admin.stdout | trim | lower) == 'true'
             fail_msg: >-
-              WinRM session on {{ inventory_hostname }} is not elevated;
+              SSH session on {{ inventory_hostname }} is not elevated;
               Chocolatey upgrades require Administrator.
           register: preflight_admin_ok
 
