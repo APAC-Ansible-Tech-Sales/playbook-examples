@@ -1,1 +1,2 @@
-playbooks/execution-environments/main.yml syntax-check[specific]
+playbooks/server_promotion/main.yml syntax-check[unknown-module]
+playbooks/execution_environments/main.yml syntax-check[specific]
