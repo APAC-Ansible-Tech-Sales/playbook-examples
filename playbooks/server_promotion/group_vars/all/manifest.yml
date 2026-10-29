@@ -9,6 +9,6 @@ chocolatey_target_version: "2.4.1"
 # Managed application packages installed with Chocolatey
 managed_packages:
   - name: git
-    version: "2.47.0"
+    version: "2.56.0"
   - name: 7zip
     version: "24.8.0"
