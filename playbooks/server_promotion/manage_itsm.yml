@@ -1,0 +1,21 @@
+- name: Update ITSM ticket with promotion status
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Update ITSM Ticket Status
+      tags:
+        - update_itsm_ticket
+        - never
+      block:
+        - name: Update ITSM
+          ansible.builtin.debug:
+            msg: "Updating ITSM ticket with promotion status"
+
+    - name: Close ITSM ticket
+      tags:
+        - close_itsm_ticket
+        - never
+      block:
+        - name: Close ITSM
+          ansible.builtin.debug:
+            msg: "Closing ITSM ticket"

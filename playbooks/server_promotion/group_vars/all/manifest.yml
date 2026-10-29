@@ -1,0 +1,14 @@
+---
+# Pinned release manifest — promote this exact set Dev → Test.
+# Override via AAP survey / extra vars when cutting a specific release.
+# Never use state: latest across environments.
+
+# Target Chocolatey client (agent) version
+chocolatey_target_version: "2.4.1"
+
+# Managed application packages installed with Chocolatey
+managed_packages:
+  - name: git
+    version: "2.47.0"
+  - name: 7zip
+    version: "24.8.0"

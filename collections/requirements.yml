@@ -1,5 +1,6 @@
 ---
 collections:
+  # Execution Environments
   - name: containers.podman
     version: ">=1.14.0,<2.0.0"
     source: https://galaxy.ansible.com/api/
@@ -11,4 +12,12 @@ collections:
     source: https://galaxy.ansible.com/api/
   - name: infra.aap_configuration
     version: ">=4.10.0,<5.0.0"
+    source: https://galaxy.ansible.com/api/
+
+  # Server Promotion
+  - name: ansible.windows
+    version: ">=3.8.0,<4.0.0"
+    source: https://galaxy.ansible.com/api/
+  - name: chocolatey.chocolatey
+    version: ">=1.6.0,<2.0.0"
     source: https://galaxy.ansible.com/api/
